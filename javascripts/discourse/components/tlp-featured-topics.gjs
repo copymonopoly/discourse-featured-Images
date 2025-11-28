@@ -71,7 +71,7 @@ export default class TlpFeaturedTopicsComponent extends Component {
       settings.topic_list_featured_images_from_current_category_only
     ) {
       finalTopics = finalTopics.filter(
-        (topic => topic.category_id === this.args.category.id
+        (topic) => topic.category_id === this.args.category.id
       );
     }
   
