@@ -39,7 +39,7 @@ export default class TlpFeaturedTopicsComponent extends Component {
     let allTopics = [];
     let page = 0;
   
-    // Discourse 分页每次最多 30 条，循环直到没有下一页
+    // 循环拉取这个 tag 下的所有话题（每页最多 30 条）
     while (true) {
       const result = await this.store.findFiltered("topicList", {
         filter: `tag/${tagName}`,
@@ -47,52 +47,53 @@ export default class TlpFeaturedTopicsComponent extends Component {
       });
   
       const topics = result?.topic_list?.topics || [];
-      if (topics.length === 0) break; // 这一页已经空了，结束
+      if (topics.length === 0) break;
   
       allTopics.push(...topics);
       page++;
   
-      // 安全阀：最多拉 500 条，防止某个 tag 有几千条把浏览器卡死
+      // 安全阀：最多 500 条，防止某个 tag 太多把浏览器卡死
       if (allTopics.length >= 500) {
-        console.warn("Featured topics 超过 500 条，已截断");
+        console.warn("Featured topics 超过 500 条，已自动截断");
         break;
       }
   
-      // 如果当前页已经少于 30 条，说明已经是最后一页了
+      // 最后一页通常不足 30 条，直接退出
       if (topics.length < 30) break;
     }
   
-    // ==================== 下面和你原来的逻辑完全一致 ====================
-  
+    // ==================== 关键修复：先排序/随机，再截取数量 ====================
     let finalTopics = allTopics;
   
-    // 只保留当前分类下的（如果开启了这个设置）
+    // 1. 可选：只保留当前分类下的帖子
     if (
       this.args.category &&
       settings.topic_list_featured_images_from_current_category_only
     ) {
       finalTopics = finalTopics.filter(
-        (topic) => topic.category_id === this.args.category.id
+        (topic => topic.category_id === this.args.category.id
       );
     }
   
-    // 数量限制：0 = 不限制
-    if (settings.topic_list_featured_images_count > 0) {
-      finalTopics = finalTopics.slice(0, settings.topic_list_featured_images_count);
-    }
-  
-    // 排序
-    if (settings.topic_list_featured_images_order === "created") {
-      finalTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    } else if (settings.topic_list_featured_images_order === "random") {
-      // 真正的随机（Fisher-Yates 洗牌，比 sort(() => Math.random()-0.5) 更均匀）
+    // 2. 先处理排序 / 随机（重点！）
+    if (settings.topic_list_featured_images_order === "random") {
+      // Fisher-Yates 洗牌，真正的全量随机
       for (let i = finalTopics.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [finalTopics[i], finalTopics[j]] = [finalTopics[j], finalTopics[i]];
       }
+    } else if (settings.topic_list_featured_images_order === "created") {
+      // 按创建时间倒序（最新的最上面）
+      finalTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
-    // 默认是 activity 排序（Discourse 默认顺序），不需要额外处理
+    // 其他情况保持 Discourse 默认 activity 顺序
   
+    // 3. 最后才做数量限制（这时候已经是随机或排好序的了）
+    if (settings.topic_list_featured_images_count > 0) {
+      finalTopics = finalTopics.slice(0, settings.topic_list_featured_images_count);
+    }
+  
+    // 赋值给模板使用
     this.featuredTopics = finalTopics;
   }
 
