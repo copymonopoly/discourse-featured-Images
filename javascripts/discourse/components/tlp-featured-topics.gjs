@@ -51,20 +51,31 @@ export default class TlpFeaturedTopicsComponent extends Component {
 
     try {
       // 2. 使用原作者封装的请求方法代替死循环，安全且兼容 Discourse API
-      const result = await featuredTopicsRequest({
+        const result = await featuredTopicsRequest({
         filterType: settings.topic_list_featured_images_filter_type,
         tag: source,
         categoryId: this.args.category?.id,
         categoryOnly: settings.topic_list_featured_images_from_current_category_only,
       });
 
-      console.log("=== [Debug] 原始请求返回的 topics:", result);
+      console.log("=== [Debug] 原始请求返回的结构:", result);
 
       if (loadId !== this.featuredTopicsLoadId) {
         return;
       }
 
-      let allTopics = result || [];
+      // 兼容各种返回结构，强制转换为数组
+      let allTopics = [];
+      if (Array.isArray(result)) {
+        allTopics = result;
+      } else if (Array.isArray(result?.topics)) {
+        allTopics = result.topics;
+      } else if (Array.isArray(result?.topic_list?.topics)) {
+        allTopics = result.topic_list.topics;
+      } else if (result && typeof result === "object") {
+        // 如果它返回的是类似 store 查出来的结果
+        allTopics = result.topic_list?.topics || result.content || [];
+      }
 
       // 3. 可用图片过滤：剔除没有缩略图的帖子
       let finalTopics = allTopics.filter((topic) => this.hasUsableImage(topic));
