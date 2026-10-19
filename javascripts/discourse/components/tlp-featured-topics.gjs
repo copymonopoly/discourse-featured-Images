@@ -8,7 +8,8 @@ import { cook } from "discourse/lib/text";
 import Category from "discourse/models/category";
 import dCategoryBadge from "discourse/ui-kit/helpers/d-category-badge";
 import dDiscourseTag from "discourse/ui-kit/helpers/d-discourse-tag";
-import { featuredTopicsRequest } from "../lib/featured-topics-filter"; // 恢复使用原作者的请求封装
+import { findCachedFeaturedTopicList } from "../lib/featured-topics-cache";
+import { featuredTopicsRequest } from "../lib/featured-topics-filter";
 import TlpFeaturedTopic from "./tlp-featured-topic";
 import TlpFeaturedTopicsCarousel from "./tlp-featured-topics-carousel";
 
@@ -35,83 +36,76 @@ export default class TlpFeaturedTopicsComponent extends Component {
 
   @action
   async getFeaturedTopics() {
-    console.log("=== [Debug] getFeaturedTopics 开始执行 ===");
-
     // 1. 检查开关与 source 配置
     const source = (settings.topic_list_featured_images_tag || "").trim();
-    console.log("=== [Debug] featuredImagesEnabled:", this.featuredImagesEnabled, "source:", source);
-
     if (!this.featuredImagesEnabled || source.length === 0) {
-      console.warn("=== [Debug] 开关未开启或标签为空，退出加载 ===");
       this.featuredTopics = [];
       return;
     }
 
+    // 2. 并发防刷机制 (LoadId)
     const loadId = ++this.featuredTopicsLoadId;
 
-    try {
-      // 2. 使用原作者封装的请求方法代替死循环，安全且兼容 Discourse API
-        const result = await featuredTopicsRequest({
-        filterType: settings.topic_list_featured_images_filter_type,
-        tag: source,
-        categoryId: this.args.category?.id,
-        categoryOnly: settings.topic_list_featured_images_from_current_category_only,
+    const tagName = source;
+    let allTopics = [];
+    let page = 0;
+
+    // 3. 你的全量循环拉取逻辑（最多 500 条）
+    while (true) {
+      const result = await this.store.findFiltered("topicList", {
+        filter: `tag/${tagName}`,
+        params: { page },
       });
 
-      console.log("=== [Debug] 原始请求返回的结构:", result);
+      const topics = result?.topic_list?.topics || [];
+      if (topics.length === 0) break;
 
-      if (loadId !== this.featuredTopicsLoadId) {
-        return;
+      allTopics.push(...topics);
+      page++;
+
+      if (allTopics.length >= 500) {
+        console.warn("Featured topics 超过 500 条，已自动截断");
+        break;
       }
 
-      // 兼容各种返回结构，强制转换为数组
-      let allTopics = [];
-      if (Array.isArray(result)) {
-        allTopics = result;
-      } else if (Array.isArray(result?.topics)) {
-        allTopics = result.topics;
-      } else if (Array.isArray(result?.topic_list?.topics)) {
-        allTopics = result.topic_list.topics;
-      } else if (result && typeof result === "object") {
-        // 如果它返回的是类似 store 查出来的结果
-        allTopics = result.topic_list?.topics || result.content || [];
-      }
-
-      // 3. 可用图片过滤：剔除没有缩略图的帖子
-      let finalTopics = allTopics.filter((topic) => this.hasUsableImage(topic));
-
-      // 4. 分类过滤逻辑
-      if (
-        this.args.category &&
-        settings.topic_list_featured_images_from_current_category_only
-      ) {
-        finalTopics = finalTopics.filter(
-          (topic) => topic.category_id === this.args.category.id
-        );
-      }
-
-      // 5. 排序 / 随机逻辑
-      if (settings.topic_list_featured_images_order === "random") {
-        finalTopics = this.shuffle(finalTopics);
-      } else if (settings.topic_list_featured_images_order === "created") {
-        finalTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      }
-
-      // 6. 截取最终数量
-      const count = Math.max(
-        0,
-        Number(settings.topic_list_featured_images_count) || 0
-      );
-      if (count > 0) {
-        finalTopics = finalTopics.slice(0, count);
-      }
-
-      console.log("=== [Debug] 最终渲染的 featuredTopics 数量:", finalTopics.length);
-      this.featuredTopics = finalTopics;
-
-    } catch (error) {
-      console.error("=== [Debug] 获取精选主题出错:", error);
+      if (topics.length < 30) break;
     }
+
+    // 异步返回后，检查是否有新的请求触发，如果有则放弃本次结果
+    if (loadId !== this.featuredTopicsLoadId) {
+      return;
+    }
+
+    // 4. 原作者的可用图片过滤：剔除没有缩略图的帖子
+    let finalTopics = allTopics.filter((topic) => this.hasUsableImage(topic));
+
+    // 5. 你的分类过滤逻辑
+    if (
+      this.args.category &&
+      settings.topic_list_featured_images_from_current_category_only
+    ) {
+      finalTopics = finalTopics.filter(
+        (topic) => topic.category_id === this.args.category.id
+      );
+    }
+
+    // 6. 你的全量排序 / 随机逻辑
+    if (settings.topic_list_featured_images_order === "random") {
+      finalTopics = this.shuffle(finalTopics);
+    } else if (settings.topic_list_featured_images_order === "created") {
+      finalTopics.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    // 7. 截取最终数量
+    const count = Math.max(
+      0,
+      Number(settings.topic_list_featured_images_count) || 0
+    );
+    if (count > 0) {
+      finalTopics = finalTopics.slice(0, count);
+    }
+
+    this.featuredTopics = finalTopics;
   }
 
   get featuredImagesEnabled() {
@@ -139,6 +133,7 @@ export default class TlpFeaturedTopicsComponent extends Component {
     }
     return shuffled;
   }
+  
 
   @computed("featuredTopics")
   get showFeatured() {
@@ -160,7 +155,8 @@ export default class TlpFeaturedTopicsComponent extends Component {
     if (settings.topic_list_featured_images_filter_type === "category") {
       return [];
     }
-    return (settings.topic_list_featured_images_tag || "").split("|");
+
+    return settings.topic_list_featured_images_tag.split("|");
   }
 
   @computed
@@ -168,6 +164,7 @@ export default class TlpFeaturedTopicsComponent extends Component {
     if (settings.topic_list_featured_images_filter_type !== "category") {
       return;
     }
+
     return Category.findSingleBySlug(settings.topic_list_featured_images_tag);
   }
 
