@@ -1,12 +1,35 @@
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { apiInitializer } from "discourse/lib/api";
-import loadScript from "discourse/lib/load-script";
-import { resizeAllGridItems } from "../lib/gridupdate";
+import { wantsNewWindow } from "discourse/lib/intercept-click";
+import Category from "discourse/models/category";
 import PreviewsDetails from "./../components/previews-details";
 import PreviewsThumbnail from "./../components/previews-thumbnail";
 import PreviewsTilesThumbnail from "./../components/previews-tiles-thumbnail";
+import { categoryContainsTopic } from "../lib/featured-topics-filter";
 
 const PLUGIN_ID = "discourse-tc-topic-list-previews";
+const INTERACTIVE_TILE_SELECTOR = [
+  "a",
+  "button",
+  "input",
+  "label",
+  "select",
+  "textarea",
+  "[role='button']",
+  "[role='link']",
+  ".avatar",
+  ".badge-category",
+  ".badge-category__wrapper",
+  ".badge-notification",
+  ".badge-posts",
+  ".badge-wrapper",
+  ".discourse-tag",
+  ".discourse-tags",
+  ".topic-actions",
+  ".topic-category",
+  ".topic-status",
+  ".topic-statuses",
+].join(",");
 
 const previewsTilesThumbnail = <template>
   <PreviewsTilesThumbnail @topic={{@topic}} />
@@ -16,39 +39,58 @@ const previewsDetails = <template>
   <PreviewsDetails @topic={{@topic}} />
 </template>;
 
-export default apiInitializer("0.8", (api) => {
+function destinationUrl(topic) {
+  if (topic.force_latest_post_nav && topic.last_post_id) {
+    return `/t/${topic.slug}/${topic.id}/${topic.last_post_id}`;
+  }
+
+  const topicUrl =
+    topic.linked_post_number && typeof topic.urlForPostNumber === "function"
+      ? topic.urlForPostNumber(topic.linked_post_number)
+      : topic.lastUnreadUrl;
+
+  return topicUrl || topic.url;
+}
+
+function dominantColour(topic) {
+  return topic?.dominant_colour ?? {};
+}
+
+function hasDominantColour(topic) {
+  return Object.keys(dominantColour(topic)).length > 0;
+}
+
+function isFeaturedTopic(topic) {
+  if (!topic) {
+    return false;
+  }
+
+  if (settings.topic_list_featured_images_filter_type === "category") {
+    const featuredCategory = Category.findSingleBySlug(
+      settings.topic_list_featured_images_tag
+    );
+    const topicCategory = Category.findById(topic.category_id);
+
+    return categoryContainsTopic(featuredCategory, topicCategory);
+  }
+
+  const featuredTags = settings.topic_list_featured_images_tag.split("|");
+  return topic.tags?.some((tag) => featuredTags.includes(tag.name));
+}
+
+export default apiInitializer((api) => {
   const siteSettings = api.container.lookup("service:site-settings");
   const topicListPreviewsService = api.container.lookup(
     "service:topic-list-previews"
   );
+  const supportsGridLanes = CSS.supports("display: grid-lanes");
 
-  api.onPageChange(() => {
-    loadScript(settings.theme_uploads.imagesloaded).then(() => {
-      if (document.querySelector(".tiles-style")) {
-        //eslint-disable-next-line no-undef
-        imagesLoaded(
-          document.querySelector(".tiles-style"),
-          resizeAllGridItems()
-        );
-      }
-    });
-  });
-
-  // Keep track of the last "step" of 400 pixels.
-  let lastIndex = 0;
-
-  // Some browsers do some strange things with off-screen images,
-  // so we need to resize the grid items when we scroll.
-  // Listen for scroll events.
-  window.addEventListener("scroll", () => {
-    // Calculate the current index (which 400-pixel block we are in)
-    const currentIndex = Math.floor(window.scrollY / 400);
-    // If we've moved into a new block, call the function.
-    if (currentIndex !== lastIndex) {
-      lastIndex = currentIndex;
-      resizeAllGridItems();
-    }
-  });
+  if (!supportsGridLanes) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "TLP: your browser does not support CSS Grid Lanes. Topic List Previews will fall back to a standard grid layout approximation for masonry. Please consider updating your browser for the best experience.  Check out CanIUse for compatibility information: https://caniuse.com/css-grid-lanes"
+    );
+  }
 
   api.registerValueTransformer("topic-list-columns", ({ value: columns }) => {
     if (topicListPreviewsService.displayTiles) {
@@ -77,31 +119,37 @@ export default apiInitializer("0.8", (api) => {
       }
       if (
         topicListPreviewsService.displayThumbnails &&
-        (context.topic.thumbnails?.length > 0 ||
+        (context.topic?.thumbnails?.length > 0 ||
           (settings.topic_list_default_thumbnail_fallback &&
             settings.topic_list_default_thumbnail !== ""))
       ) {
         value.push("has-thumbnail");
       }
+      if (settings.topic_list_tiles_larger_featured_tiles) {
+        if (isFeaturedTopic(context.topic)) {
+          value.push("featured-topic");
+        }
+      }
       if (
         siteSettings.topic_list_enable_thumbnail_colour_determination &&
         topicListPreviewsService.displayThumbnails
       ) {
-        let red = context.topic.dominant_colour?.red || 0;
-        let green = context.topic.dominant_colour?.green || 0;
-        let blue = context.topic.dominant_colour?.blue || 0;
+        const colour = dominantColour(context.topic);
+        let red = colour.red || 0;
+        let green = colour.green || 0;
+        let blue = colour.blue || 0;
 
         //make 1 the minimum value to avoid total black
         red = red === 0 ? 1 : red;
         green = green === 0 ? 1 : green;
         blue = blue === 0 ? 1 : blue;
 
-        let averageIntensity = context.topic.dominant_colour
+        let averageIntensity = hasDominantColour(context.topic)
           ? (red + green + blue) / 3
           : null;
 
         if (
-          Object.keys(context.topic?.dominant_colour).length === 0 ||
+          !hasDominantColour(context.topic) ||
           !(
             settings.topic_list_dominant_color_background === "always" ||
             (topicListPreviewsService.displayTiles &&
@@ -131,11 +179,12 @@ export default apiInitializer("0.8", (api) => {
         (settings.topic_list_dominant_color_background === "always" ||
           (topicListPreviewsService.displayTiles &&
             settings.topic_list_dominant_color_background === "tiles only")) &&
-        Object.keys(context.topic?.dominant_colour).length !== 0
+        hasDominantColour(context.topic)
       ) {
-        let red = context.topic.dominant_colour?.red || 0;
-        let green = context.topic.dominant_colour?.green || 0;
-        let blue = context.topic.dominant_colour?.blue || 0;
+        const colour = dominantColour(context.topic);
+        let red = colour.red || 0;
+        let green = colour.green || 0;
+        let blue = colour.blue || 0;
 
         //make 1 the minimum value to avoid total black
         red = red === 0 ? 1 : red;
@@ -144,7 +193,7 @@ export default apiInitializer("0.8", (api) => {
 
         let newRgb = "rgb(" + red + "," + green + "," + blue + ")";
 
-        value.push(htmlSafe(`background: ${newRgb};`));
+        value.push(trustHTML(`background: ${newRgb};`));
       }
       return value;
     }
@@ -203,6 +252,36 @@ export default apiInitializer("0.8", (api) => {
     }
     return columns;
   });
+
+  api.registerBehaviorTransformer(
+    "topic-list-item-click",
+    ({ next, context }) => {
+      if (!topicListPreviewsService.displayTiles) {
+        return next();
+      }
+
+      const result = next();
+      const { event, navigateToTopic, topic } = context;
+      const target = event
+        .composedPath()
+        .find((element) => element instanceof Element);
+
+      if (
+        event.defaultPrevented ||
+        wantsNewWindow(event) ||
+        !target ||
+        typeof navigateToTopic !== "function" ||
+        target.closest(INTERACTIVE_TILE_SELECTOR)
+      ) {
+        return result;
+      }
+
+      event.preventDefault();
+      navigateToTopic(topic, destinationUrl(topic));
+
+      return result;
+    }
+  );
 
   api.modifyClass("component:search-result-entries", {
     pluginId: PLUGIN_ID,

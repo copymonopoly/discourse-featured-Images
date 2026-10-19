@@ -101,7 +101,7 @@ topic_list_portfolio:
   description:
     en: "Enable additional User Activity view for User Portfolio"
 topic_list_portfolio_icons:
-  default: 'images'
+  default: "images"
   description:
     en: "The icon you wish to use for the Portfolio button and Portfolio label"
 topic_list_portfolio_filter_type:
@@ -160,6 +160,29 @@ topic_list_featured_images:
   type: bool
   description:
     en: "Enable featured images for non-category routes."
+topic_list_featured_images_view_type:
+  default: Camera roll
+  type: enum
+  choices:
+    - Camera roll
+    - Carousel
+  description:
+    en: "Display featured images as a continuously scrolling camera roll or carousel."
+topic_list_featured_images_placement:
+  default: Above topic list
+  type: enum
+  choices:
+    - Above topic list
+    - Above navigation controls
+  description:
+    en: "Display featured images above the topic list (discovery-list-container-top) or above the navigation controls (discovery-list-controls-above)."
+topic_list_featured_images_carousel_count:
+  default: 3
+  min: 1
+  max: 4
+  type: integer
+  description:
+    en: "Maximum number of featured images shown in the desktop carousel. Narrow carousels show fewer; mobile always shows one."
 topic_list_featured_images_resolution_level:
   default: 2
   max: 6
@@ -177,17 +200,24 @@ topic_list_featured_images_from_current_category_only:
   type: bool
   description:
     en: "Show featured images only that exist in current Category"
+topic_list_featured_images_filter_type:
+  default: tag
+  type: enum
+  choices:
+    - tag
+    - category
+  description:
+    en: "Choose whether the featured image source is a tag or category."
 topic_list_featured_images_tag:
-  type: list
-  list_type: tag
+  type: string
   default: ""
   description:
-    en: "Featured images tag."
-topic_list_featured_images_tag_show:
+    en: "Enter a tag, pipe-delimited tags, or a category slug, depending on the featured image filter type."
+topic_list_featured_images_source_show:
   default: true
   type: bool
   description:
-    en: "Show featured images tag below featured images."
+    en: "Show the tag or category source below featured images."
 topic_list_featured_images_count:
   default: 0
   description:
@@ -216,25 +246,55 @@ topic_list_featured_height_mobile:
   type: integer
   description:
     en: "Featured image height on mobile."
+topic_list_preview_metadata_font_size:
+  default: 12
+  type: integer
+  description:
+    en: "Font size in pixels for topic list preview metadata."
 topic_list_featured_title:
   default: ""
   type: string
   description:
     en: "Featured images title. Supports Markdown."
-topic_list_featured_excerpt:
-  default: 100
+topic_list_featured_excerpt_desktop:
+  default: 0
+  min: 0
   type: integer
   description:
-    en: "Include topic excerpt in featured image and determine its length.  Set it to 0 for don't include"
-topic_list_featured_details_always_show:
-  default: only on hover
+    en: "Maximum number of excerpt characters shown with featured images on desktop. Set to 0 to hide excerpts."
+topic_list_featured_excerpt_mobile:
+  default: 0
+  min: 0
+  type: integer
+  description:
+    en: "Maximum number of excerpt characters shown with featured images on mobile. Set to 0 to hide excerpts."
+topic_list_featured_details_desktop:
+  default: Under
   type: enum
   choices:
-    - only on hover
-    - mobile device
-    - always
+    - Under
+    - Over on hover
+    - Always over
   description:
-    en: "Always show details in featured image"
+    en: "Display featured image details below the image, over the image on hover, or always over the image on desktop."
+topic_list_featured_details_mobile:
+  default: Over
+  type: enum
+  choices:
+    - Over
+    - Under
+  description:
+    en: "Display featured image details over or below the image on mobile."
+topic_list_featured_author_desktop:
+  default: true
+  type: bool
+  description:
+    en: "Show the featured topic author on desktop. Over-image details show the username and avatar; under-image details show a clickable avatar beside the title."
+topic_list_featured_author_mobile:
+  default: true
+  type: bool
+  description:
+    en: "Show the featured topic author on mobile. Over-image details show the username and avatar; under-image details show only the avatar beside the title."
 topic_list_test_image_url_timeout:
   default: 5000
   type: integer
